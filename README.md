@@ -3,27 +3,27 @@ MDnet visual tracking algorithm implementation version 3
 
 Files:
 
-  libv3.py: contains all classes and most functions
+		libv3.py: contains all classes and most functions
   
-  options.py: contains all parameters we need to modify
+		options.py: contains all parameters we need to modify
   
-  srcv3.py: offline_training, online_tracking
+		srcv3.py: offline_training, online_tracking
 
 
 Dependencies:
 
-  (1)python3.5
+		(1)python3.5
   
-  (2)opencv,numpy
+		(2)opencv,numpy
   
-  (3)pytorch
+		(3)pytorch
   
-  (4)scikit-learn
+		(4)scikit-learn
  
 
 Hardware:
 
-  Nvidia GTX TITAN X(recommended), but it can also run without gpu.
+		Nvidia GTX TITAN X(recommended), but it can also run without gpu.
   
 
  

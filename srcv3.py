@@ -6,7 +6,8 @@ import os
 import numpy as np
 from torch.autograd import Variable
 import torch.optim as optim
-from libv3 import mdnet,BinaryLoss,boundingbox,paths_gts,extract_regions_with_SampleGenerator_in_a_frame,\
+import argparse
+from libv3 import mdnet,boundingbox,paths_gts,extract_regions_with_SampleGenerator_in_a_frame,\
     online_set_requires_grad,offline_train_set_requires_grad,mdnet_conv3_output,\
     boundingbox_regressor_train,sp_generator,mdnet_offline_one_frame_train,\
     mdnet_online_one_frame_train,regions_estimate_with_SampleGenerator_in_a_frame,\
@@ -89,7 +90,7 @@ def offline_train(epoches,seqnames):
             for frame_nb in range(len(imgpathlist)):
                 img=cv2.imread(imgpathlist[frame_nb])
                 start = time.time()
-                net,loss=mdnet_offline_one_frame_train(net,branch_id,optimizer,img,bbs[frame_nb])
+                loss=mdnet_offline_one_frame_train(net,branch_id,optimizer,img,bbs[frame_nb])
                 with open(log_path,mode="a") as f:
                     s="{},{},".format(
                             video,frame_nb+1)+\
@@ -116,7 +117,7 @@ def online_tracking(seqname):
     # branch trained with shared layers being locked
     frame_nb=0
     img=cv2.imread(imgpathlist[frame_nb])
-    net,loss,pos_regions,neg_regions=mdnet_online_one_frame_train(net,branch_id,optimizer,img,bbs[frame_nb],
+    loss,pos_regions,neg_regions=mdnet_online_one_frame_train(net,branch_id,optimizer,img,bbs[frame_nb],
                               options.frame1_pos_sps,options.frame1_neg_sps)# both regions are Variables
     pos_regions_all,neg_regions_all=pos_regions[:options.pos_update_sps],neg_regions[:options.neg_update_sps]
     cur_bb=bbs[frame_nb]
@@ -134,18 +135,21 @@ def online_tracking(seqname):
         target_score=top_scores.mean()
         success=(target_score>options.success_thr)
         top_bbs=[sample_bbs[i.data[0]] for i in top_indices]
+        assert len(top_bbs)>0,"top_bbs is empty"
         target_bb=boundingbox_mean(top_bbs)
         if success:
+            print("successful")
             sp_generator.set_trans_f(options.next_trans_f)
             bbreg_sample_bbs=[sample_bbs[i.data[0]] for i in top_indices]
-            bbreg_sample_regions=[sample_regions[i.data[0]] for i in top_indices]
+            bbreg_sample_regions=[sample_regions[i.data[0]] for i in top_indices]# sample_regions are arrays
             bbreg_sample_regions=np.array(bbreg_sample_regions)
             bbreg_sample_regions=Variable(torch.from_numpy(bbreg_sample_regions).float())
             if torch.cuda.is_available():
                 bbreg_sample_regions=bbreg_sample_regions.cuda()
             bbreg_feature_tensor=mdnet_conv3_output(net,bbreg_sample_regions)
             bbreg_sample_bbs=bbr.predict(bbreg_feature_tensor,bbreg_sample_bbs)
-            target_bb=boundingbox_mean(bbreg_sample_bbs)
+            if len(bbreg_sample_regions)>0:
+                target_bb=boundingbox_mean(bbreg_sample_bbs)
             cur_bb = target_bb
             result.append(cur_bb)
             # data collection
@@ -165,28 +169,29 @@ def online_tracking(seqname):
             pos_regions_all=torch.cat([pos_regions_all,pos_example_regions],dim=0)
             neg_regions_all=torch.cat((neg_regions_all,neg_example_regions),dim=0)
             l_pos,l_neg=pos_regions_all.size()[0],neg_regions_all.size()[0]
-            if l_pos>options.n_frame_long*options.pos_update_sps:
-                pos_regions_all=pos_regions_all[l_pos-options.n_frame_long*options.pos_update_sps:]
-            if l_neg>options.n_frame_short*options.neg_update_sps:
-                neg_regions_all=neg_regions_all[l_neg-options.n_frame_short*options.neg_update_sps:]
+            # if l_pos>options.n_frame_long*options.pos_update_sps:
+            #     pos_regions_all=pos_regions_all[l_pos-options.n_frame_long*options.pos_update_sps:]
+            # if l_neg>options.n_frame_short*options.neg_update_sps:
+            #     neg_regions_all=neg_regions_all[l_neg-options.n_frame_short*options.neg_update_sps:]
+            if l_pos>options.frame1_pos_sps:
+                pos_regions_all=pos_regions_all[-options.frame1_pos_sps:]
+            if l_neg>options.frame1_neg_sps:
+                neg_regions_all=neg_regions_all[-options.frame1_neg_sps:]
         else:
+            print("failed")
             cur_bb=result[-1]
             result.append(target_bb)
             sp_generator.set_trans_f(options.trans_f_expand)
             # short-term update updates
-            net = mdnet_online_one_frame_train(net, branch_id, optimizer, img, cur_bb,
-                                               pos_regions=pos_regions_all, neg_regions=neg_regions_all)
+            mdnet_online_one_frame_train(net, branch_id, optimizer, img, cur_bb,
+                                        pos_regions=pos_regions_all, neg_regions=neg_regions_all)
         # result
         # long-term update updates fc4, fc5 and the branch using
         if frame_nb%options.long_term_interval==0:
 
-            net=mdnet_online_one_frame_train(net,branch_id,optimizer,img,cur_bb,
-                                             pos_regions=pos_regions_all,neg_regions=neg_regions_all)
-            """
-            RuntimeError: cuda runtime error (2) : out of memory at /b/wheel/pytorch-src/torch/lib/THC/generic/THCStorage.cu:66
-            (dl_gpu) 
+            mdnet_online_one_frame_train(net,branch_id,optimizer,img,cur_bb,
+                                        pos_regions=pos_regions_all,neg_regions=neg_regions_all)
 
-            """
         fps=1.0/(time.time()-start)
         tracking_result(seqname[8:],bbs[frame_nb],cur_bb,img,frame_nb+1,fps)
 def main0():
@@ -247,4 +252,21 @@ def main1():
 def main2():
     online_tracking("vot2016/marching")
 if __name__ == '__main__':
-    main2()
+    # main2()
+    parser=argparse.ArgumentParser()
+    parser.add_argument("part",help="the part of mdnet you run")
+    args=parser.parse_args()
+    if args.part=="offline0":
+        offline_train(2, ["vot2016/singer3"])
+    elif args.part=="offline1":
+        with open("vot2016.txt", "r") as f:
+            seqnames_with_back_slashes = f.readlines()
+        seqnames = [seqname_with_back_slash[:-1] for seqname_with_back_slash in
+                    seqnames_with_back_slashes]
+        print(seqnames[:-1])
+        offline_train(100 * options.K, seqnames[:-1])
+    elif args.part=="online0":
+        # the whole MDnet
+        video=input("the video you test: ")
+        seqname=os.path.join("vot2016",video)
+        online_tracking(seqname)

@@ -82,9 +82,9 @@ class BinaryLoss(nn.Module):
         pos_loss=pos_score[:,0].sum()
         neg_loss=neg_score[:,1].sum()
         return -(pos_loss+neg_loss)
-def fetch_needed_region_with_a_bb_imgpath_pair(bb,bgrimgpath):
-    tmp=bb.fetch_given_path(bgrimgpath)
-    return cv2.resize(tmp,dsize=crop_size)
+# def fetch_needed_region_with_a_bb_imgpath_pair(bb,bgrimgpath):
+#     tmp=bb.fetch_given_path(bgrimgpath)
+#     return cv2.resize(tmp,dsize=crop_size)
 def fetch_needed_region_with_a_bb_img_pair(bb,bgr_img):
     tmp=bb.fetch(bgr_img)
     # assert tmp.shape[0]>=1 and tmp.shape[1]>=1,"tmp shape={},bb={}".format(tmp.shape,bb)
@@ -130,8 +130,8 @@ def paths_gts(seqname):
     # cv2.waitKey()
     # cv2.destroyAllWindows()
     return imgpathlist,gtary.astype(np.int)
-def clip(x):
-    return np.clip(x,0,int(1e5))
+# def clip(x):
+#     return np.clip(x,0,int(1e5))
 def xml_read(xml_path):
     """
 
@@ -358,9 +358,9 @@ class BBRegressor():
 
         r=[u[0].IoU(u[1]) for u in zip(bblist,bblist_)]
         s=[u[0].area()/u[1].area() for u in zip(bblist,bblist_)]
-        assert len(r)>0,"len(r)={}".format(len(r))
-        assert len(s)==len(bblist),"len(s)={},but len(bblist)={}".format(len(s),len(bblist))
-        assert len(self.scale_range)==2 and len(self.overlap_range)==2,"check scale_range or overlap_range"
+        # assert len(r)>0,"len(r)={}".format(len(r))
+        # assert len(s)==len(bblist),"len(s)={},but len(bblist)={}".format(len(s),len(bblist))
+        # assert len(self.scale_range)==2 and len(self.overlap_range)==2,"check scale_range or overlap_range"
         indices = [i for i in range(len(bblist))
                if r[i] >= self.overlap_range[0] and
                r[i] <= self.overlap_range[1] and
@@ -416,9 +416,13 @@ neg_generator=SampleGenerator('uniform', options.neg_trans_f,options.neg_scale_f
 sp_generator=SampleGenerator("gaussian",options.next_trans_f,options.next_scale_f,valid=True)
 criterion = BinaryLoss()
 def boundingbox_mean(bbs):
+    assert len(bbs)>0,"bbs is empty"
+    if len(bbs)==1:
+        return bbs[0]
     bbs_array_tmp=[(bb.xmin,bb.ymin,bb.xmax,bb.ymax) for
                    bb in bbs]# numpy cannot convert a generator instance to a meaningful array
     bbs_array=np.array(bbs_array_tmp)
+    # assert bbs_array.ndim==2,"bbs_array={}".format(bbs_array)
     bb_mean_array=np.mean(bbs_array,axis=0)
     return boundingbox(bb_mean_array)
 def online_set_requires_grad(net):
@@ -430,8 +434,6 @@ def online_set_requires_grad(net):
     net.conv3.requires_grad = False
     net.fc4.requires_grad = True
     net.fc5.requires_grad = True
-    # for fc in net.branches:
-    #     fc.requires_grad=True
     net.branches[K].requires_grad = True
     return net
 def offline_train_set_requires_grad(net,branch_id):
@@ -448,31 +450,28 @@ def offline_train_set_requires_grad(net,branch_id):
         if k!=branch_id:
             net.branches[branch_id].requires_grad = False
     return net
-def extract_regions_in_a_frame(imgpath, bb):
-    pos_bbs, neg_bbs = bb.off_sampling()
-    img = cv2.imread(imgpath)
-    pos_regions = list(map(
-        fetch_needed_region_with_a_bb_img_pair, pos_bbs, [img] * len(pos_bbs)
-    ))
-    neg_regions = list(map(
-        fetch_needed_region_with_a_bb_img_pair, neg_bbs, [img] * len(neg_bbs)
-    ))
-    pos_regions = np.array(pos_regions).transpose(0, 3, 1, 2)
-    neg_regions = np.array(neg_regions).transpose(0, 3, 1, 2)
-    return [pos_regions, neg_regions]
-"""
-extract_regions obtains positive and negative examples in frames[idx:idx+options.frames]
-"""
-def extract_regions(idx, imgpaths, bbs, frames=options.frames):
-    tmp = list(map(
-        extract_regions_in_a_frame, imgpaths[idx:idx + frames], bbs[idx:idx + frames]
-    ))  # [[pos_regions,neg_regions],[pos_regions,neg_regions],...[pos_regions,neg_regions]]
-    pos_regions = tmp[0][0]
-    neg_regions = tmp[0][1]
-    for i in range(1, frames):
-        pos_regions = np.concatenate([pos_regions, tmp[i][0]], axis=0)
-        neg_regions = np.concatenate([neg_regions, tmp[i][1]], axis=0)
-    return pos_regions, neg_regions
+# def extract_regions_in_a_frame(imgpath, bb):
+#     pos_bbs, neg_bbs = bb.off_sampling()
+#     img = cv2.imread(imgpath)
+#     pos_regions = list(map(
+#         fetch_needed_region_with_a_bb_img_pair, pos_bbs, [img] * len(pos_bbs)
+#     ))
+#     neg_regions = list(map(
+#         fetch_needed_region_with_a_bb_img_pair, neg_bbs, [img] * len(neg_bbs)
+#     ))
+#     pos_regions = np.array(pos_regions).transpose(0, 3, 1, 2)
+#     neg_regions = np.array(neg_regions).transpose(0, 3, 1, 2)
+#     return [pos_regions, neg_regions]
+# def extract_regions(idx, imgpaths, bbs, frames=options.frames):
+#     tmp = list(map(
+#         extract_regions_in_a_frame, imgpaths[idx:idx + frames], bbs[idx:idx + frames]
+#     ))  # [[pos_regions,neg_regions],[pos_regions,neg_regions],...[pos_regions,neg_regions]]
+#     pos_regions = tmp[0][0]
+#     neg_regions = tmp[0][1]
+#     for i in range(1, frames):
+#         pos_regions = np.concatenate([pos_regions, tmp[i][0]], axis=0)
+#         neg_regions = np.concatenate([neg_regions, tmp[i][1]], axis=0)
+#     return pos_regions, neg_regions
 
 def extract_regions_with_SampleGenerator_in_a_frame(img, bb, pos_sps=options.pos_sps, neg_sps=options.neg_sps):
 
@@ -493,6 +492,7 @@ def mdnet_offline_one_frame_train(net,branch_id,optimizer,img,bb,
                                   pos_sps=options.pos_sps,neg_sps=options.neg_sps):
     # net=offline_train_set_requires_grad(net,branch_id)
     # don't do it every frame. it wastes time
+    # don't need to set train() after offline_train_set_requires_grad()
     pos_regions, neg_regions = extract_regions_with_SampleGenerator_in_a_frame(img, bb, pos_sps, neg_sps)
     pos_regions = Variable(torch.from_numpy(pos_regions).float())
     neg_regions = Variable(torch.from_numpy(neg_regions).float())
@@ -506,7 +506,7 @@ def mdnet_offline_one_frame_train(net,branch_id,optimizer,img,bb,
     loss.backward()
     torch.nn.utils.clip_grad_norm(net.parameters(), 10)
     optimizer.step()
-    return net,loss
+    return loss
 def mdnet_online_one_frame_train(net,branch_id,optimizer,img,bb,
                                   pos_sps=options.pos_sps,neg_sps=options.neg_sps,
                                  pos_regions=0,neg_regions=0):
@@ -526,7 +526,7 @@ def mdnet_online_one_frame_train(net,branch_id,optimizer,img,bb,
     loss.backward()
     torch.nn.utils.clip_grad_norm(net.parameters(), 10)
     optimizer.step()
-    return net,loss,pos_regions,neg_regions
+    return loss,pos_regions,neg_regions
 
 
 def regions_estimate_with_SampleGenerator_in_a_frame(img,cur_bb,net,
@@ -559,13 +559,12 @@ def boundingbox_regressor_train(net,imgpath,bbgt):
     img = cv2.imread(imgpath)
     reg_generator = SampleGenerator("uniform", 0.3, 1.5, 1.1)
     # only use it once, so put it inside the function to reduce memory usage
-    reg_bbs=reg_generator(bbgt,options.reg_sps,img.shape)
+    reg_bbs=reg_generator(bbgt,options.reg_sps)
 
     reg_regions=list(map(
         fetch_needed_region_with_a_bb_img_pair, reg_bbs, [img] * len(reg_bbs)#resized
     ))
     reg_regions=np.array(reg_regions).transpose(0,3,1,2)
-
     reg_regions=Variable(torch.from_numpy(reg_regions).float())
     if torch.cuda.is_available():
         reg_regions=reg_regions.cuda()

@@ -1,5 +1,6 @@
 # MDnet
-MDnet visual tracking algorithm implementation version 3. Sample trained_nets which are trained on vot2016  are also uploaded as zip files
+
+MDnet visual tracking algorithm implementation version 3. A trainded model mdnetv3.pt which is trained on vot2016 and one result, vot2016/marching are also uploaded as zip files
 
 
 How to run:

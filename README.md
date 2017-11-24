@@ -1,5 +1,12 @@
 # MDnet
-MDnet visual tracking algorithm implementation version 3
+MDnet visual tracking algorithm implementation version 3. Sample trained_nets which are trained on vot2016  are also uploaded as zip files
+
+
+How to run:
+
+		CUDA_VISIBLE_DEVICES=2 python srcv3.py online0
+		
+		the program asks you to input a video name and you need to download and prepare vot2016 datasets
 
 Files:
 

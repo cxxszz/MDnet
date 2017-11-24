@@ -22,7 +22,7 @@ K=44
 #train
 vot_folder_path = ".."
 data_path="vot2016.pkl"
-n_frame_long,n_frame_short=100,20
+n_frame_long,n_frame_short=10,2
 corner_sigma=1.0/23
 center_sigma=0.56
 pos_sps=32
@@ -31,7 +31,7 @@ reg_sps=1000
 pos_thre=0.7
 neg_thre=0.3
 frame1_pos_sps=500
-frame1_neg_sps=500
+frame1_neg_sps=1000
 pos_trans_f=0.1
 pos_scale_f=1.2
 pos_aspect_f=1.1

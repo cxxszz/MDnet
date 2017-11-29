@@ -18,6 +18,27 @@ Files:
 		srcv3.py: offline_training, online_tracking
 
 
+Folder paths organization:
+
+	-vot2016/
+	
+	-mdnet/
+		
+		-libv3.py
+		
+		-srcv3.py
+		
+		-options.py
+		
+		-vot2016.txt
+		
+		-results/
+		
+		-trained_nets/
+		
+			-mdnetv3.pt
+
+
 Dependencies:
 
 		(1)python3.5

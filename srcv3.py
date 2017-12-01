@@ -17,7 +17,7 @@ mdnetpath="mdnetv3.pt"
 trained_net_path="trained_nets/mdnetv3.pt"
 logs_directory="log3s"
 results_directory="results"
-def tracking_result(seqname,gtbb,cur_bb,img,img_nb,fps):
+def tracking_result(seqname,gtbb,cur_bb,img,img_nb,target_score,fps):
     """
 
     :param seqname: like "marching"
@@ -30,20 +30,18 @@ def tracking_result(seqname,gtbb,cur_bb,img,img_nb,fps):
     """
     if not os.path.exists(results_directory):
         os.system("mkdir {}".format(results_directory))
-    the_result_directory=os.path.join(results_directory,seqname)#"
-    if not os.path.exists(the_result_directory):
-        os.system("mkdir {}".format(the_result_directory))
-    imgs_directory=os.path.join(the_result_directory,"imgs")
-    if not os.path.exists(imgs_directory):
-        os.system("mkdir {}".format(imgs_directory))
-    result_path=os.path.join(the_result_directory,"{}.txt".format(seqname))
-    img_path=os.path.join(imgs_directory,"{}.jpg".format(img_nb))
+    result_imgs_directory=os.path.join(results_directory,seqname)#"
+    if not os.path.exists(result_imgs_directory):
+        os.system("mkdir {}".format(result_imgs_directory))
+
+    result_path=os.path.join(results_directory,"{}.txt".format(seqname))
+    img_path=os.path.join(result_imgs_directory,"{}.jpg".format(img_nb))
     cv2.rectangle(img,(int(gtbb.xmin),int(gtbb.ymin)),(int(gtbb.xmax),int(gtbb.ymax)),(255,0,0))
     cv2.rectangle(img,(int(cur_bb.xmin),int(cur_bb.ymin)),(int(cur_bb.xmax),int(cur_bb.ymax)),(0,255,0))
     cv2.imwrite(img_path,img)
     with open(result_path,"a") as f:
-        s=" ".join((
-            str(gtbb),str(cur_bb),str(gtbb.IoU(cur_bb)),str(fps),"\n"
+        s=",".join((
+            str(gtbb),str(cur_bb),str(gtbb.IoU(cur_bb)),str(fps),str(np.exp(target_score)),"\n"
         ))
         print(s)
         f.write(s)
@@ -103,6 +101,7 @@ def offline_train(epoches,seqnames):
 
         torch.save(net,mdnetpath)
 # if a function is created as an instance, pos_sps and neg_sps should only be assigned once
+# if a function is created as an instance, pos_sps and neg_sps should only be assigned once
 
 def online_tracking(seqname):
     result=[]
@@ -132,13 +131,14 @@ def online_tracking(seqname):
         sample_bbs,sample_regions,sample_scores=regions_estimate_with_SampleGenerator_in_a_frame(
             img,cur_bb,net,branch_id)
         top_scores,top_indices=sample_scores[:,0].topk(5)
-        target_score=top_scores.mean()
+        target_score=top_scores.mean().cpu().data.numpy()[0]
+        # print("target_score={}".format(target_score))
         success=(target_score>options.success_thr)
         top_bbs=[sample_bbs[i.data[0]] for i in top_indices]
         assert len(top_bbs)>0,"top_bbs is empty"
         target_bb=boundingbox_mean(top_bbs)
         if success:
-            print("successful")
+            print("successful:{}".format(np.exp(top_scores.cpu().data.numpy())))
             sp_generator.set_trans_f(options.next_trans_f)
             bbreg_sample_bbs=[sample_bbs[i.data[0]] for i in top_indices]
             bbreg_sample_regions=[sample_regions[i.data[0]] for i in top_indices]# sample_regions are arrays
@@ -148,7 +148,7 @@ def online_tracking(seqname):
                 bbreg_sample_regions=bbreg_sample_regions.cuda()
             bbreg_feature_tensor=mdnet_conv3_output(net,bbreg_sample_regions)
             bbreg_sample_bbs=bbr.predict(bbreg_feature_tensor,bbreg_sample_bbs)
-            if len(bbreg_sample_regions)>0:
+            if len(bbreg_sample_bbs)>0:
                 target_bb=boundingbox_mean(bbreg_sample_bbs)
             cur_bb = target_bb
             result.append(cur_bb)
@@ -173,12 +173,12 @@ def online_tracking(seqname):
             #     pos_regions_all=pos_regions_all[l_pos-options.n_frame_long*options.pos_update_sps:]
             # if l_neg>options.n_frame_short*options.neg_update_sps:
             #     neg_regions_all=neg_regions_all[l_neg-options.n_frame_short*options.neg_update_sps:]
-            if l_pos>options.frame1_pos_sps:
-                pos_regions_all=pos_regions_all[-options.frame1_pos_sps:]
-            if l_neg>options.frame1_neg_sps:
-                neg_regions_all=neg_regions_all[-options.frame1_neg_sps:]
+            if l_pos>options.pos_all_sps:
+                pos_regions_all=pos_regions_all[-options.pos_all_sps:]
+            if l_neg>options.neg_all_sps:
+                neg_regions_all=neg_regions_all[-options.neg_all_sps:]
         else:
-            print("failed")
+            print("failed: {}".format(np.exp(top_scores.cpu().data.numpy())))
             cur_bb=result[-1]
             result.append(target_bb)
             sp_generator.set_trans_f(options.trans_f_expand)
@@ -187,13 +187,13 @@ def online_tracking(seqname):
                                         pos_regions=pos_regions_all, neg_regions=neg_regions_all)
         # result
         # long-term update updates fc4, fc5 and the branch using
-        if frame_nb%options.long_term_interval==0:
+        if frame_nb%options.online_train_interval==0:
 
             mdnet_online_one_frame_train(net,branch_id,optimizer,img,cur_bb,
                                         pos_regions=pos_regions_all,neg_regions=neg_regions_all)
 
         fps=1.0/(time.time()-start)
-        tracking_result(seqname[8:],bbs[frame_nb],cur_bb,img,frame_nb+1,fps)
+        tracking_result(seqname[8:],bbs[frame_nb],cur_bb,img,frame_nb+1,target_score,fps)
 def main0():
     """
     1)some bounding boxes are partly outside of the image,

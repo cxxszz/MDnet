@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import options
-import pickle
 import os
 import numpy as np
 import cv2
-from collections import OrderedDict
 from torch.autograd import Variable
 from sklearn.linear_model import Ridge
 """
@@ -82,9 +79,6 @@ class BinaryLoss(nn.Module):
         pos_loss=pos_score[:,0].sum()
         neg_loss=neg_score[:,1].sum()
         return -(pos_loss+neg_loss)
-# def fetch_needed_region_with_a_bb_imgpath_pair(bb,bgrimgpath):
-#     tmp=bb.fetch_given_path(bgrimgpath)
-#     return cv2.resize(tmp,dsize=crop_size)
 def fetch_needed_region_with_a_bb_img_pair(bb,bgr_img):
     tmp=bb.fetch(bgr_img)
     # assert tmp.shape[0]>=1 and tmp.shape[1]>=1,"tmp shape={},bb={}".format(tmp.shape,bb)
@@ -130,8 +124,6 @@ def paths_gts(seqname):
     # cv2.waitKey()
     # cv2.destroyAllWindows()
     return imgpathlist,gtary.astype(np.int)
-# def clip(x):
-#     return np.clip(x,0,int(1e5))
 def xml_read(xml_path):
     """
 
@@ -246,12 +238,12 @@ class boundingbox(object):
     def to_tl_range_tuple(self):
         return (self.xmin,self.ymin,self.wid,self.hei)
 class SampleGenerator():
-    def __init__(self, type,trans_f=1.0, scale_f=1.0, aspect_f=None, valid=False):
+    def __init__(self, type,trans_f=1.0, scale_f=1.0, aspect_f=None):
         self.type = type
         self.trans_f = trans_f
         self.scale_f = scale_f
         self.aspect_f = aspect_f
-        self.valid = valid
+
     def __call__(self, bb, n,img_size=None):
         # img_size = np.array(img_size) box adjustment is handled in boundingbox class
         # bb-> target array (xmin,ymin,wid,hei)
@@ -393,27 +385,12 @@ class BBRegressor():
 
         Y = np.concatenate((dst_xy, dst_wh), axis=1)
         return Y
-class Accuracy():
-    def __call__(self, pos_score, neg_score):
-        pos_correct = (pos_score[:, 1] > pos_score[:, 0]).sum().float()
-        neg_correct = (neg_score[:, 1] < neg_score[:, 0]).sum().float()
 
-        pos_acc = pos_correct / (pos_score.size(0) + 1e-8)
-        neg_acc = neg_correct / (neg_score.size(0) + 1e-8)
-
-        return pos_acc.data[0], neg_acc.data[0]
-class Precision():
-    def __call__(self, pos_score, neg_score):
-        scores = torch.cat((pos_score[:, 1], neg_score[:, 1]), 0)
-        topk = torch.topk(scores, pos_score.size(0))[1]
-        prec = (topk < pos_score.size(0)).float().sum() / (pos_score.size(0) + 1e-8)
-
-        return prec.data[0]
 K=options.K
 crop_size=options.crop_size
-pos_generator=SampleGenerator('gaussian',options.pos_trans_f,options.pos_scale_f,options.pos_aspect_f,True)
-neg_generator=SampleGenerator('uniform', options.neg_trans_f,options.neg_scale_f,options.neg_aspect_f,True)
-sp_generator=SampleGenerator("gaussian",options.next_trans_f,options.next_scale_f,valid=True)
+pos_generator=SampleGenerator('gaussian',options.pos_trans_f,options.pos_scale_f,options.pos_aspect_f)
+neg_generator=SampleGenerator('uniform', options.neg_trans_f,options.neg_scale_f,options.neg_aspect_f)
+sp_generator=SampleGenerator("gaussian",options.next_trans_f,options.next_scale_f,options.sp_aspect_f)
 criterion = BinaryLoss()
 def boundingbox_mean(bbs):
     assert len(bbs)>0,"bbs is empty"
@@ -450,28 +427,6 @@ def offline_train_set_requires_grad(net,branch_id):
         if k!=branch_id:
             net.branches[branch_id].requires_grad = False
     return net
-# def extract_regions_in_a_frame(imgpath, bb):
-#     pos_bbs, neg_bbs = bb.off_sampling()
-#     img = cv2.imread(imgpath)
-#     pos_regions = list(map(
-#         fetch_needed_region_with_a_bb_img_pair, pos_bbs, [img] * len(pos_bbs)
-#     ))
-#     neg_regions = list(map(
-#         fetch_needed_region_with_a_bb_img_pair, neg_bbs, [img] * len(neg_bbs)
-#     ))
-#     pos_regions = np.array(pos_regions).transpose(0, 3, 1, 2)
-#     neg_regions = np.array(neg_regions).transpose(0, 3, 1, 2)
-#     return [pos_regions, neg_regions]
-# def extract_regions(idx, imgpaths, bbs, frames=options.frames):
-#     tmp = list(map(
-#         extract_regions_in_a_frame, imgpaths[idx:idx + frames], bbs[idx:idx + frames]
-#     ))  # [[pos_regions,neg_regions],[pos_regions,neg_regions],...[pos_regions,neg_regions]]
-#     pos_regions = tmp[0][0]
-#     neg_regions = tmp[0][1]
-#     for i in range(1, frames):
-#         pos_regions = np.concatenate([pos_regions, tmp[i][0]], axis=0)
-#         neg_regions = np.concatenate([neg_regions, tmp[i][1]], axis=0)
-#     return pos_regions, neg_regions
 
 def extract_regions_with_SampleGenerator_in_a_frame(img, bb, pos_sps=options.pos_sps, neg_sps=options.neg_sps):
 
@@ -507,6 +462,37 @@ def mdnet_offline_one_frame_train(net,branch_id,optimizer,img,bb,
     torch.nn.utils.clip_grad_norm(net.parameters(), 10)
     optimizer.step()
     return loss
+def mdnet_online_one_frame_train_avoiding_memory_leak(net,branch_id,optimizer,pos_regions,neg_regions):
+    pos_scores = net(pos_regions, branch_id)
+    neg_scores = net(neg_regions, branch_id)
+    loss = criterion(pos_scores, neg_scores)
+    optimizer.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm(net.parameters(), 10)
+    optimizer.step()
+    return loss
+def pos_regions_neg_regions_serialize(pos_regions_all,neg_regions_all):
+    """
+    pos_regions_all and neg_regions_all are too big for the gpu to process
+    :return: a list of pos_regions and a list of neg_regions
+    """
+    l_pos=pos_regions_all.size()[0]# int
+    l_neg=neg_regions_all.size()[0]
+    pos_size,neg_size=l_pos//options.serializations,l_neg//options.serializations
+    pos_regions_list,neg_regions_list=[],[]
+    for i in range(options.serializations):
+        pos_regions_list.append(pos_regions_all[i*pos_size:(i+1)*pos_size])
+        neg_regions_list.append(neg_regions_all[i*neg_size:(i+1)*neg_size])
+    # if
+    try:
+        pos_regions_list.append(pos_regions_all[options.serializations*pos_size:])
+    except ValueError:
+        pos_regions_list.append(pos_regions_list[-1])
+    try:
+        neg_regions_list.append(neg_regions_all[options.serializations*neg_size:])
+    except ValueError:
+        neg_regions_list.append(neg_regions_list[-1])
+    return pos_regions_list,neg_regions_list
 def mdnet_online_one_frame_train(net,branch_id,optimizer,img,bb,
                                   pos_sps=options.pos_sps,neg_sps=options.neg_sps,
                                  pos_regions=0,neg_regions=0):
@@ -519,13 +505,12 @@ def mdnet_online_one_frame_train(net,branch_id,optimizer,img,bb,
     if torch.cuda.is_available():
         pos_regions = pos_regions.cuda()
         neg_regions = neg_regions.cuda()
-    pos_scores = net(pos_regions, branch_id)
-    neg_scores = net(neg_regions, branch_id)
-    loss = criterion(pos_scores, neg_scores)
-    optimizer.zero_grad()
-    loss.backward()
-    torch.nn.utils.clip_grad_norm(net.parameters(), 10)
-    optimizer.step()
+    pos_regions_list,neg_regions_list=pos_regions_neg_regions_serialize(pos_regions,neg_regions)
+
+    for i in range(options.serializations+1):
+        loss=mdnet_online_one_frame_train_avoiding_memory_leak(net,branch_id,optimizer,
+                                                          pos_regions_list[i],neg_regions_list[i])
+
     return loss,pos_regions,neg_regions
 
 

@@ -1,6 +1,6 @@
 # MDnet
 
-MDnet visual tracking algorithm implementation version 3. A trainded model mdnetv3.pt which is trained on vot2016 and one result, vot2016/marching are also uploaded, in which blue windows are groundtruth boundingboxes while green ones are tracking results
+MDnet visual tracking algorithm implementation version 3. A trainded model mdnetv3.pt which is trained on vot2016 and one result, vot2016/marching are also uploaded, in which blue windows are groundtruth boundingboxes while green ones are tracking results. Better performance with respect to fps, precision and success has achieved
 
 
 How to run:
